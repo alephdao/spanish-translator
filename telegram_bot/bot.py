@@ -24,9 +24,12 @@ from modules import transcribe_audio, ConversationManager
 # Configuration
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+LOCAL_MODE = os.getenv("LOCAL_MODE", "false").lower() == "true"
 HETZNER_HOST = os.getenv("HETZNER_HOST", "178.156.209.222")
 HETZNER_USER = os.getenv("HETZNER_USER", "root")
 HETZNER_DATA_DIR = os.getenv("HETZNER_DATA_DIR", "/opt/spanish-translator/data")
+LOCAL_DATA_DIR = os.getenv("LOCAL_DATA_DIR", str(Path(__file__).parent / "data"))
+CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-5-20241022")
 
 PROJECT_ROOT = Path(__file__).parent.parent
 PROMPTS_DIR = Path(__file__).parent / "prompts"
@@ -73,7 +76,7 @@ async def translate_message(user_id: int, text: str) -> str:
 
     try:
         response = client.messages.create(
-            model="claude-haiku-4-5-20251001",
+            model=CLAUDE_MODEL,
             max_tokens=1024,
             system=system_prompt,
             messages=messages
@@ -110,12 +113,19 @@ async def main():
         return
 
     # Initialize conversation manager
-    conversation_manager = ConversationManager(
-        hetzner_host=HETZNER_HOST,
-        hetzner_user=HETZNER_USER,
-        data_dir=HETZNER_DATA_DIR
-    )
-    logger.info(f"Conversation manager initialized (Hetzner: {HETZNER_HOST})")
+    if LOCAL_MODE:
+        conversation_manager = ConversationManager(
+            data_dir=LOCAL_DATA_DIR,
+            local_mode=True
+        )
+        logger.info(f"Conversation manager initialized (LOCAL: {LOCAL_DATA_DIR})")
+    else:
+        conversation_manager = ConversationManager(
+            hetzner_host=HETZNER_HOST,
+            hetzner_user=HETZNER_USER,
+            data_dir=HETZNER_DATA_DIR
+        )
+        logger.info(f"Conversation manager initialized (Hetzner: {HETZNER_HOST})")
 
     # Initialize bot
     bot = Bot(token=TELEGRAM_TOKEN)
