@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
-Spanish Translator Telegram Bot
-Translates messages to Argentine Spanish using Claude API.
-Stores conversation history as JSON on Hetzner server.
+Spanish Translator Telegram Bot - Using Claude Agent SDK
+Translates messages to Argentine Spanish using Claude.
 """
 
 from dotenv import load_dotenv
@@ -13,17 +12,22 @@ import logging
 import os
 import sys
 from pathlib import Path
+from typing import Optional
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import Message
-import anthropic
+from claude_agent_sdk import (
+    ClaudeSDKClient,
+    ClaudeAgentOptions,
+    AssistantMessage,
+    TextBlock,
+)
 
 from modules import transcribe_audio, ConversationManager
 
 # Configuration
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 LOCAL_MODE = os.getenv("LOCAL_MODE", "false").lower() == "true"
 HETZNER_HOST = os.getenv("HETZNER_HOST", "178.156.209.222")
 HETZNER_USER = os.getenv("HETZNER_USER", "root")
@@ -42,11 +46,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Anthropic client
-client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+# Per-user Claude clients
+claude_clients: dict[int, ClaudeSDKClient] = {}
 
 # Conversation manager (initialized in main)
-conversation_manager: ConversationManager = None
+conversation_manager: Optional[ConversationManager] = None
 
 
 def load_system_prompt() -> str:
@@ -54,50 +58,86 @@ def load_system_prompt() -> str:
     prompt_path = PROMPTS_DIR / "system_prompt.md"
     if not prompt_path.exists():
         logger.warning(f"Prompt file not found: {prompt_path}")
-        return "You are an Argentine Spanish translator. Translate the input to Argentine Spanish. Return only the translation, nothing else."
+        return "You are an Argentine Spanish translator. Translate the input to Argentine Spanish (castellano rioplatense). Return only the translation, nothing else."
     with open(prompt_path, 'r') as f:
         return f.read()
 
 
-async def translate_message(user_id: int, text: str) -> str:
-    """Translate a message to Argentine Spanish using Claude"""
+async def initialize_claude_client() -> ClaudeSDKClient:
+    """Initialize Claude SDK client with custom system prompt"""
     system_prompt = load_system_prompt()
+
+    options = ClaudeAgentOptions(
+        cwd=str(PROJECT_ROOT),
+        system_prompt=system_prompt,
+        model=CLAUDE_MODEL,
+        permission_mode="bypassPermissions",
+        max_turns=5,
+    )
+
+    client = ClaudeSDKClient(options=options)
+    await client.__aenter__()
+    return client
+
+
+async def get_client_for_user(user_id: int) -> ClaudeSDKClient:
+    """Get or create Claude client for a specific user"""
+    if user_id not in claude_clients:
+        logger.info(f"Creating new Claude client for user {user_id}")
+        claude_clients[user_id] = await initialize_claude_client()
+    return claude_clients[user_id]
+
+
+async def reset_client_for_user(user_id: int):
+    """Reset Claude client for a user (starts fresh conversation)"""
+    if user_id in claude_clients:
+        logger.info(f"Resetting Claude client for user {user_id}")
+        try:
+            await claude_clients[user_id].__aexit__(None, None, None)
+        except Exception as e:
+            logger.warning(f"Error closing client for user {user_id}: {e}")
+        del claude_clients[user_id]
+
+
+async def translate_message(user_id: int, text: str) -> str:
+    """Translate a message to Argentine Spanish using Claude SDK"""
+    client = await get_client_for_user(user_id)
 
     # Get conversation history for context
     history = conversation_manager.get_messages(user_id)
 
-    # Build messages array
-    messages = []
-    for msg in history[-10:]:  # Last 10 messages for context
-        messages.append({"role": msg["role"], "content": msg["content"]})
+    # Build context from history
+    context_parts = []
+    for msg in history[-6:]:  # Last 6 messages for context
+        role = "User" if msg["role"] == "user" else "Translation"
+        context_parts.append(f"{role}: {msg['content']}")
 
-    # Add current message
-    messages.append({"role": "user", "content": text})
+    if context_parts:
+        full_prompt = f"Previous translations:\n{chr(10).join(context_parts)}\n\nNow translate this: {text}"
+    else:
+        full_prompt = f"Translate this to Argentine Spanish: {text}"
 
-    try:
-        response = client.messages.create(
-            model=CLAUDE_MODEL,
-            max_tokens=1024,
-            system=system_prompt,
-            messages=messages
-        )
+    # Save user message
+    conversation_manager.add_message(user_id, "user", text)
 
-        # Extract text from response
-        translation = ""
-        for block in response.content:
-            if hasattr(block, 'text'):
-                translation += block.text
-        translation = translation.strip()
+    # Query Claude
+    await client.query(full_prompt)
 
-        # Save to conversation history
-        conversation_manager.add_message(user_id, "user", text)
-        conversation_manager.add_message(user_id, "assistant", translation)
+    # Get response
+    response_text = ""
+    async for sdk_message in client.receive_response():
+        if isinstance(sdk_message, AssistantMessage):
+            for block in sdk_message.content:
+                if isinstance(block, TextBlock):
+                    response_text += block.text
 
-        return translation
+    if not response_text:
+        response_text = "Error: No pude generar la traduccion."
 
-    except Exception as e:
-        logger.error(f"Translation error: {e}", exc_info=True)
-        return f"Error translating: {str(e)}"
+    # Save translation
+    conversation_manager.add_message(user_id, "assistant", response_text)
+
+    return response_text
 
 
 async def main():
@@ -106,10 +146,6 @@ async def main():
 
     if not TELEGRAM_TOKEN:
         logger.error("TELEGRAM_TOKEN not found!")
-        return
-
-    if not ANTHROPIC_API_KEY:
-        logger.error("ANTHROPIC_API_KEY not found!")
         return
 
     # Initialize conversation manager
@@ -135,7 +171,7 @@ async def main():
     async def cmd_start(message: Message):
         await message.answer(
             "Hola! I'm your Argentine Spanish translator.\n\n"
-            "Send me any text or voice message and I'll translate it to Argentine Spanish.\n\n"
+            "Send me any text or voice message and I'll translate it to Argentine Spanish (castellano rioplatense).\n\n"
             "Commands:\n"
             "- /new - Start a new conversation\n"
             "- /history - Show recent translations"
@@ -145,6 +181,7 @@ async def main():
     async def cmd_new(message: Message):
         user_id = message.from_user.id
         new_conv_id = conversation_manager.new_conversation(user_id)
+        await reset_client_for_user(user_id)
         await message.answer(f"Nueva conversacion! (ID: {new_conv_id})")
 
     @dp.message(F.text.startswith("/history"))
@@ -233,6 +270,13 @@ async def main():
     try:
         await dp.start_polling(bot)
     finally:
+        # Cleanup all per-user Claude clients
+        for user_id, client in list(claude_clients.items()):
+            try:
+                await client.__aexit__(None, None, None)
+            except Exception as e:
+                logger.warning(f"Error closing client for user {user_id}: {e}")
+        claude_clients.clear()
         await bot.session.close()
 
 

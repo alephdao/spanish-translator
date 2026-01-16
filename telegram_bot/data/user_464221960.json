@@ -1,0 +1,51 @@
+{
+  "conversations": [
+    {
+      "id": "03db5520",
+      "started": "2026-01-16T12:32:46.161908",
+      "ended": null,
+      "messages": [
+        {
+          "role": "user",
+          "content": "hi!",
+          "timestamp": "2026-01-16T12:44:28.894272"
+        },
+        {
+          "role": "assistant",
+          "content": "API Error: 404 {\"type\":\"error\",\"error\":{\"type\":\"not_found_error\",\"message\":\"model: claude-sonnet-4-5-20241022\"},\"request_id\":\"req_011CXBKDE1Aodoi7BCitLcM9\"}",
+          "timestamp": "2026-01-16T12:44:29.491625"
+        },
+        {
+          "role": "user",
+          "content": "hi",
+          "timestamp": "2026-01-16T12:46:41.695857"
+        },
+        {
+          "role": "assistant",
+          "content": "API Error: 404 {\"type\":\"error\",\"error\":{\"type\":\"not_found_error\",\"message\":\"model: claude-sonnet-4.5\"},\"request_id\":\"req_011CXBKP4LmjdttJbph89ADG\"}",
+          "timestamp": "2026-01-16T12:46:42.983800"
+        },
+        {
+          "role": "user",
+          "content": "hi",
+          "timestamp": "2026-01-16T12:47:00.552404"
+        },
+        {
+          "role": "assistant",
+          "content": "API Error: 404 {\"type\":\"error\",\"error\":{\"type\":\"not_found_error\",\"message\":\"model: claude-sonnet-4.5\"},\"request_id\":\"req_011CXBKQQMKmKebbqgyG4bfH\"}",
+          "timestamp": "2026-01-16T12:47:01.074360"
+        },
+        {
+          "role": "user",
+          "content": "hi",
+          "timestamp": "2026-01-16T12:48:19.085580"
+        },
+        {
+          "role": "assistant",
+          "content": "¡Hola!",
+          "timestamp": "2026-01-16T12:48:20.624885"
+        }
+      ]
+    }
+  ]
+}
